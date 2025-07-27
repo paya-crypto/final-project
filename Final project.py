@@ -1,90 +1,85 @@
-# 1. Import required libraries
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-
+import joblib
+import os
+print("hello")
 from sklearn.ensemble import IsolationForest
 from sklearn.neighbors import LocalOutlierFactor
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split, StratifiedShuffleSplit
-from sklearn.metrics import classification_report, confusion_matrix, roc_curve, auc
-from imblearn.over_sampling import SMOTE
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score, roc_curve
+
 from xgboost import XGBClassifier
 
-# 2. Load the dataset
-df = pd.read_csv("C:\\Users\\PAYAL MAHARANA\\OneDrive\\Documents\\python\\creditcard.csv")
+# Create output folders if not exist
+os.makedirs("models", exist_ok=True)
+os.makedirs("visuals", exist_ok=True)
 
-# 3. Preprocessing
-df['normalizedAmount'] = StandardScaler().fit_transform(df[['Amount']])
-df.drop(['Time', 'Amount'], axis=1, inplace=True)
+# 1. Load Dataset
+df = pd.read_csv("C:\\Users\\jay30\\OneDrive\\Documents\\myprojects\\python\\PS_20174392719_1491204439457_log.csv")
+# 2. Preprocessing
+# Encode 'type' feature
+df['type'] = LabelEncoder().fit_transform(df['type'])
 
-# 4. Feature matrix and label
-X = df.drop('Class', axis=1)
-y = df['Class']
+# Drop unnecessary columns
+df.drop(['nameOrig', 'nameDest'], axis=1, inplace=True)
 
-# 5. Anomaly Detection (optional analysis)
-print("\n🔍 Applying Isolation Forest...")
-iso_forest = IsolationForest(contamination=0.01, random_state=42)
-y_pred_if = iso_forest.fit_predict(X)
-print(classification_report(y, y_pred_if == -1))
+# Feature Scaling
+scaler = StandardScaler()
+scaled_cols = ['amount', 'oldbalanceOrg', 'newbalanceOrig', 'oldbalanceDest', 'newbalanceDest']
+df[scaled_cols] = scaler.fit_transform(df[scaled_cols])
 
-print("\n🔍 Applying Local Outlier Factor...")
-lof = LocalOutlierFactor(n_neighbors=20, contamination=0.01)
-y_pred_lof = lof.fit_predict(X)
-print(classification_report(y, y_pred_lof == -1))
+# Features and Labels
+X = df.drop(['isFraud', 'isFlaggedFraud'], axis=1)
+y = df['isFraud']
 
-# 6. Balance the dataset using SMOTE
-print("\n⚖️ Applying SMOTE...")
-sm = SMOTE(random_state=42)
-X_res, y_res = sm.fit_resample(X, y)
+# 3. Anomaly Detection (optional)
+iso = IsolationForest(contamination=0.001, random_state=42)
+lof = LocalOutlierFactor(n_neighbors=20, contamination=0.001)
 
-# 7. Stratified Split to prevent bias
-sss = StratifiedShuffleSplit(n_splits=1, test_size=0.3, random_state=42)
-for train_idx, test_idx in sss.split(X_res, y_res):
-    X_train, X_test = X_res.iloc[train_idx], X_res.iloc[test_idx]
-    y_train, y_test = y_res.iloc[train_idx], y_res.iloc[test_idx]
+iso_pred = pd.Series(np.where(iso.fit_predict(X) == -1, 1, 0))
+lof_pred = pd.Series(np.where(lof.fit_predict(X) == -1, 1, 0))
 
-# 8. Train XGBoost Classifier
-print("\n🚀 Training XGBoost...")
-model = XGBClassifier(use_label_encoder=False, eval_metric='logloss', random_state=42)
+ensemble_pred = ((iso_pred + lof_pred) >= 1).astype(int)
+# Optional: uncomment to use ensemble predictions
+# y = ensemble_pred
+
+# 4. Train-Test Split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, stratify=y, random_state=42)
+
+# 5. Train XGBoost with scale_pos_weight
+weight = len(y_train[y_train == 0]) / len(y_train[y_train == 1])
+model = XGBClassifier(eval_metric='logloss')
 model.fit(X_train, y_train)
 
-# 9. Evaluate the model
+# 6. Evaluate
 y_pred = model.predict(X_test)
-print("\n📊 Confusion Matrix:")
-sns.heatmap(confusion_matrix(y_test, y_pred), annot=True, fmt='d', cmap='Blues')
+y_proba = model.predict_proba(X_test)[:, 1]
+
+print("\nClassification Report:\n", classification_report(y_test, y_pred))
+print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred))
+print("ROC AUC Score:", roc_auc_score(y_test, y_proba))
+
+# 7. Visualizations
+plt.figure(figsize=(6, 5))
+sns.heatmap(confusion_matrix(y_test, y_pred), annot=True, fmt='d', cmap='Reds')
 plt.title("Confusion Matrix")
-plt.xlabel("Predicted")
-plt.ylabel("Actual")
+plt.savefig("visuals/confusion_matrix.png")
 plt.show()
 
-print("\n📄 Classification Report:\n", classification_report(y_test, y_pred))
-
-# 10. Check for overfitting
-print("\n✅ Model Accuracy:")
-print(f"Train Accuracy: {model.score(X_train, y_train):.4f}")
-print(f"Test Accuracy : {model.score(X_test, y_test):.4f}")
-
-# 11. ROC Curve
-y_probs = model.predict_proba(X_test)[:, 1]
-fpr, tpr, _ = roc_curve(y_test, y_probs)
-roc_auc = auc(fpr, tpr)
-
-plt.figure(figsize=(8,6))
-plt.plot(fpr, tpr, color='darkorange', lw=2, label='XGBoost ROC (AUC = %0.2f)' % roc_auc)
-plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
-plt.xlabel('False Positive Rate')
-plt.ylabel('True Positive Rate')
-plt.title('Receiver Operating Characteristic (ROC) Curve')
-plt.legend(loc="lower right")
-plt.grid(True)
+fpr, tpr, _ = roc_curve(y_test, y_proba)
+plt.figure(figsize=(6, 5))
+plt.plot(fpr, tpr, label="XGBoost (AUC = {:.3f})".format(roc_auc_score(y_test, y_proba)))
+plt.plot([0, 1], [0, 1], 'k--')
+plt.xlabel("False Positive Rate")
+plt.ylabel("True Positive Rate")
+plt.title("ROC Curve")
+plt.legend()
+plt.savefig("visuals/roc_curve.png")
 plt.show()
 
-
-
-import joblib
-
-# Save the trained model
-joblib.dump(model, "xgb_model_2.pkl")
-print("✅ Model saved as xgb_model_2.pkl")
+# 8. Save Model
+joblib.dump(model, "python/fraud_xgb_paysim.pkl")
+print("✅ Model saved as 'python/fraud_xgb_paysim.pkl'")
