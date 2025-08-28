@@ -18,7 +18,7 @@ os.makedirs("models", exist_ok=True)
 os.makedirs("visuals", exist_ok=True)
 
 # 1. Load Dataset
-df = pd.read_csv("C:\\Users\\jay30\\OneDrive\\Documents\\myprojects\\python\\PS_20174392719_1491204439457_log.csv")
+df = pd.read_csv("C:\\Users\\PAYAL MAHARANA\\OneDrive\\Documents\\\\python\\PS_20174392719_1491204439457_log.csv")
 # 2. Preprocessing
 # Encode 'type' feature
 df['type'] = LabelEncoder().fit_transform(df['type'])
@@ -83,3 +83,4 @@ plt.show()
 # 8. Save Model
 joblib.dump(model, "python/fraud_xgb_paysim.pkl")
 print("✅ Model saved as 'python/fraud_xgb_paysim.pkl'")
+
